@@ -1,0 +1,144 @@
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <FS.h>
+#include <LittleFS.h>
+#include <SPI.h>
+#include <jsonlib.h>
+#include <ESP8266WiFi.h>
+#include <WiFiClient.h>
+#include <ESPAsyncWebServer.h>
+#include <ESPAsyncTCP.h>
+AsyncWebServer server(80);
+AsyncWebSocket ws("/ws");
+#include <ArduinoJson.h>
+  String reciv;
+
+
+// Data wire is plugged into port 2 on the Arduino
+#define ONE_WIRE_BUS 4
+#define tilt 14
+#define buzzer 16
+// Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
+OneWire oneWire(ONE_WIRE_BUS);
+// Pass our oneWire reference to Dallas Temperature. 
+DallasTemperature sensors(&oneWire);
+// arrays to hold device address
+DeviceAddress insideThermometer;
+
+
+float ambiant = 0.0;
+bool state = false;
+int i = 0;
+bool ii = false;
+void setup() {
+  // put your setup code here, to run once:
+Serial.begin(9600);
+pinMode(tilt,INPUT_PULLUP);
+pinMode(buzzer,OUTPUT);
+  sensors.begin();
+ if (!LittleFS.begin()) {
+    Serial.println("LittleFS mount failed");
+    return;
+  }
+// listDir("/");
+
+
+ WiFi.mode(WIFI_AP); //WIFI MODE
+
+Serial.println("Ready");
+ 
+//*********server init()****************  
+  WiFi.softAP("AntiSleep","");
+  IPAddress myIP = WiFi.softAPIP();
+  Serial.print("AP IP address: ");
+  Serial.println(myIP);
+//   Serial.println(softAPSSID());
+ initWebSocket(); 
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    //request->send_P(200, "text/html", index_html, processor);
+  });
+  // Start server
+  server.begin();  
+}
+
+void loop() {
+   ws.cleanupClients();
+ Main(); 
+}
+
+
+void Main(){
+  Reading();
+ Serial.print("ambiant : ");
+Serial.println(amb());
+Serial.println("");
+ Serial.print("tilt : ");
+Serial.println(digitalRead(tilt));
+ temp();
+ 
+if((digitalRead(tilt) == HIGH) && (amb() >= readFile("/amb.txt").toInt()) && (temp() <= readFile("/temp.txt").toInt())  ){
+tone(buzzer,2800,1000);
+  ii = true;
+}
+else{
+  digitalWrite(buzzer,LOW); 
+  ii = false;
+}
+
+//delay(50);
+}
+
+
+float amb(){
+  ambiant = analogRead(A0)/10.23;
+  return ambiant;
+}
+
+
+float temp(){
+   sensors.requestTemperatures(); // Send the command to get temperatures
+  float tempC = sensors.getTempCByIndex(0);
+
+  if(tempC != DEVICE_DISCONNECTED_C) 
+  {
+    Serial.print("temperature: ");
+    Serial.println(tempC);
+    return tempC;
+  } 
+  else
+  {
+    Serial.println("Error: Could not read temperature data");
+  }
+}
+
+
+void Reading(){
+if(ii == true && i == 0){
+   state = true;
+   i = 1;
+}
+else if(ii == true && i == 1){
+   state = false;
+   i = 1;
+}
+else if(ii == false && i == 1){
+   state = false; 
+   i = 0;
+}
+else{
+  i = 0;
+}
+  DynamicJsonDocument doc(1024);
+ JsonObject obj = doc.as<JsonObject>();
+ doc["temp"] = temp();
+doc["amb"] = amb(); 
+doc["tilt"] = state;
+doc["tempThre"] = readFile("/temp.txt");
+doc["ambThre"] = readFile("/amb.txt");
+ String output;
+  serializeJsonPretty(doc, output);
+//   Serial.println(output);
+ 
+// / Serial.println(JSON_Data);     
+ ws.textAll(output);
+}
